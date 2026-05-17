@@ -1,19 +1,46 @@
-export function ulid(): string {
-  const ts = BigInt(Date.now());
-  let timePart = "";
-  let remaining = ts;
-  for (let i = 0; i < 10; i++) {
-    timePart = CROCKFORD[Number(remaining & 0x1fn)] + timePart;
-    remaining >>= 5n;
-  }
+class ULIDGenerator {
+  private lastTs = 0n;
+  private lastRandomValue = 0n;
 
-  const random = new Uint8Array(10);
-  crypto.getRandomValues(random);
-  let randomPart = "";
-  for (let i = 0; i < 10; i++) {
-    randomPart += CROCKFORD[random[i]! & 0x1f];
+  ulid(): string {
+    const ts = BigInt(Date.now());
+    let randomValue: bigint;
+
+    if (ts === this.lastTs) {
+      randomValue = this.lastRandomValue + 1n;
+    } else {
+      const random = new Uint8Array(10);
+      crypto.getRandomValues(random);
+      randomValue = 0n;
+      for (let i = 0; i < 10; i++) {
+        randomValue = (randomValue << 8n) | BigInt(random[i]!);
+      }
+    }
+
+    this.lastTs = ts;
+    this.lastRandomValue = randomValue;
+
+    let remaining = ts;
+    let timePart = "";
+    for (let i = 0; i < 10; i++) {
+      timePart = CROCKFORD[Number(remaining & 0x1fn)] + timePart;
+      remaining >>= 5n;
+    }
+
+    let temp = randomValue;
+    let randomPart = "";
+    for (let i = 0; i < 16; i++) {
+      randomPart = CROCKFORD[Number(temp & 0x1fn)] + randomPart;
+      temp >>= 5n;
+    }
+    return timePart + randomPart;
   }
-  return timePart + randomPart;
+}
+
+const ulidGen = new ULIDGenerator();
+
+export function ulid(): string {
+  return ulidGen.ulid();
 }
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -21,11 +48,20 @@ const URL_SAFE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 const URL_SAFE_LEN = 64;
 
 export function nanoid(size = 21): string {
-  const len = Math.max(1, size);
-  const bytes = new Uint8Array(len);
+  if (typeof size !== "number" || !Number.isFinite(size)) {
+    throw new RangeError("nanoid size must be a finite number");
+  }
+  if (!Number.isInteger(size)) {
+    throw new RangeError("nanoid size must be an integer");
+  }
+  if (size < 0) {
+    throw new RangeError("nanoid size must be non-negative");
+  }
+  if (size === 0) return "";
+  const bytes = new Uint8Array(size);
   crypto.getRandomValues(bytes);
   let result = "";
-  for (let i = 0; i < len; i++) {
+  for (let i = 0; i < size; i++) {
     result += URL_SAFE[bytes[i]! % URL_SAFE_LEN];
   }
   return result;

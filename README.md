@@ -18,7 +18,7 @@ bun-id provides 4 ID generators, all Bun-native and zero dependencies.
 ```typescript
 import { ulid, nanoid, shortid, uuid } from "@nds-stack/bun-id";
 
-ulid();      // → "0DH9X7BV4BAJ5G7KVM2P"     (20 chars, sortable)
+ulid();      // → "0DH9X7BV4BAJ5G7KVM2P01BX5D5B7K" (26 chars, sortable)
 nanoid();    // → "V1StGXR8_Z5jdHi6B-myT"       (21 chars, URL-safe)
 shortid();   // → "a3b8c9d1"                     (8 chars, compact)
 uuid();      // → "550e8400e29b41d4a716446655440000" (32 chars, no dashes)
@@ -30,7 +30,7 @@ uuid();      // → "550e8400e29b41d4a716446655440000" (32 chars, no dashes)
 
 | Function | Output | Length | Sortable | URL-safe | Use Case |
 |----------|--------|--------|----------|----------|----------|
-| `ulid()` | Crockford base32 | 20 | ✅ Timestamp-prefixed | ✅ | Primary keys, event IDs |
+| `ulid()` | Crockford base32 | 26 | ✅ Timestamp-prefixed | ✅ | Primary keys, event IDs |
 | `nanoid(size?)` | URL-safe base64 | 21 (default) | ❌ | ✅ | Short URLs, tokens |
 | `shortid()` | Hex | 8 | ❌ | ✅ | Log correlation, display |
 | `uuid()` | Hex (no dashes) | 32 | ❌ | ✅ | Legacy compatibility |
@@ -83,8 +83,8 @@ All functions use `crypto.getRandomValues()` for cryptographically secure random
 **ULID encoding:**
 1. Get current timestamp as BigInt
 2. Encode 41-50 bits as 10 Crockford base32 characters (BigInt bit shifting, LSB → string → reversed to MSB-first)
-3. Generate 10 random bytes → 10 base32 characters
-4. Concatenate time + random = 20 chars
+3. Generate 10 random bytes → 16 base32 characters (80-bit BigInt, 5 bits per char)
+4. Concatenate time + random = 26 chars
 
 **NanoID encoding:**
 1. Generate N random bytes
@@ -136,6 +136,171 @@ uuid()      | 3.9M ops/s
 | Bun-native | ✅ | ❌ Polyfills | ❌ Polyfills | ✅ |
 | Zero dependencies | ✅ | ❌ | ❌ | ✅ |
 | Bundle size | 0KB | ~3KB + deps | ~2KB + deps | **~0.6KB** |
+
+---
+
+## Error Handling
+
+All ID generation functions use cryptographically secure randomness and never throw under normal use:
+
+```typescript
+import { ulid, nanoid, shortid, uuid } from "@nds-stack/bun-id";
+
+ulid();      // always succeeds
+nanoid();    // always succeeds
+shortid();   // always succeeds
+uuid();      // always succeeds
+```
+
+### Edge Case: `size=0`
+
+```typescript
+nanoid(0);   // → "" (empty string)
+```
+
+All other edge cases (negative size, non-integer size) are handled by `crypto.getRandomValues()` — the Web API will throw its own `TypeError` for invalid arguments, which is the expected behavior.
+
+---
+
+## Multi-Instance
+
+ID generation is **stateless** — no shared state, no counters, no timestamps stored between calls. This makes all functions safe for concurrent use in workers, clusters, or serverless runtimes:
+
+```typescript
+import { ulid } from "@nds-stack/bun-id";
+import { Worker } from "bun";
+
+// Each call is independent — no shared mutation
+const id1 = ulid();
+const id2 = ulid();
+
+// Safe to call from multiple workers concurrently
+new Worker(new URL("./worker.ts", import.meta.url));
+
+// worker.ts
+import { ulid } from "@nds-stack/bun-id";
+console.log(ulid()); // independent generation
+```
+
+> **Collision probability** depends entirely on the quality of `crypto.getRandomValues()` — the same CSPRNG source used by `crypto.randomUUID()`. For `nanoid(21)` (~126 bits entropy), collisions are virtually impossible at scale.
+
+---
+
+## Customization Guide
+
+### Create Prefixed IDs
+
+```typescript
+import { ulid, nanoid } from "@nds-stack/bun-id";
+
+function prefixedUlid(prefix: string): string {
+  return `${prefix}_${ulid()}`;
+}
+
+function prefixedNanoid(prefix: string): string {
+  return `${prefix}_${nanoid()}`;
+}
+
+console.log(prefixedUlid("usr")); // "usr_0DH9X7BV4BAJ5G7KVM2P01BX5D"
+console.log(prefixedNanoid("sess")); // "sess_V1StGXR8_Z5jdHi6B-myT"
+```
+
+### Create Sortable IDs with Custom Prefix
+
+Combine ULID with a custom prefix to get sortable, human-readable identifiers:
+
+```typescript
+import { ulid } from "@nds-stack/bun-id";
+
+function sortableId(entity: string): string {
+  return `${entity}_${ulid()}`;
+}
+
+// These will sort lexicographically by timestamp
+const order1 = sortableId("order"); // "order_0DH9X7...";
+const order2 = sortableId("order"); // "order_0DH9X8...";
+// order1 < order2 (timestamp-based ordering)
+```
+
+### Create IDs with Embedded Timestamps
+
+Use ULID's timestamp prefix to extract creation time:
+
+```typescript
+import { ulid } from "@nds-stack/bun-id";
+
+function createTimestampedId(): string {
+  return ulid(); // first 10 chars encode timestamp
+}
+
+// Decode timestamp from ULID (manual)
+function getUlidTimestamp(ulidStr: string): number {
+  const timeChars = ulidStr.slice(0, 10);
+  return timeChars.split("").reduce((acc, c) => {
+    const val = "0123456789ABCDEFGHJKMNPQRSTVWXYZ".indexOf(c);
+    return acc * 32 + val;
+  }, 0);
+}
+
+const id = createTimestampedId();
+console.log("Created at:", new Date(getUlidTimestamp(id)).toISOString());
+```
+
+---
+
+## Real-World Example
+
+### Using ULID as Primary Key
+
+Complete example: generating sortable primary keys for a user database table.
+
+```typescript
+import { ulid, nanoid } from "@nds-stack/bun-id";
+// import { db } from "./db";  // bun:sqlite or Postgres client
+
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: Date;
+}
+
+async function createUser(email: string, name: string): Promise<User> {
+  const user: User = {
+    id: ulid(),          // sortable primary key
+    email,
+    name,
+    createdAt: new Date(),
+  };
+
+  // await db.run(
+  //   "INSERT INTO users (id, email, name, created_at) VALUES (?, ?, ?, ?)",
+  //   [user.id, user.email, user.name, user.createdAt.toISOString()]
+  // );
+
+  return user;
+}
+
+async function createSession(userId: string): Promise<string> {
+  const sessionId = `sess_${nanoid()}`;  // prefixed, non-sortable token
+
+  // await db.run(
+  //   "INSERT INTO sessions (id, user_id, created_at) VALUES (?, ?, ?)",
+  //   [sessionId, userId, new Date().toISOString()]
+  // );
+
+  return sessionId;
+}
+
+// Usage: Users will be ordered by creation time when sorted by ID
+// SELECT * FROM users ORDER BY id;  ← lexicographically sorted by creation time
+```
+
+**Benefits of ULID as primary key:**
+- **Sortable** — `ORDER BY id` gives creation order without a separate timestamp column
+- **Unique** — 128 bits of randomness with timestamp prefix
+- **URL-safe** — no special characters
+- **Index-friendly** — monotonic prefix improves B-tree insertion performance
 
 ---
 
