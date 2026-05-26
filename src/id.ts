@@ -13,7 +13,7 @@ class ULIDGenerator {
       crypto.getRandomValues(random);
       randomValue = 0n;
       for (let i = 0; i < 10; i++) {
-        randomValue = (randomValue << 8n) | BigInt(random[i]!);
+        randomValue = (randomValue << 8n) | BigInt(random[i] as number);
       }
     }
 
@@ -51,7 +51,7 @@ export function nanoid(size = 21): string {
   if (typeof size !== "number" || !Number.isFinite(size)) {
     throw new RangeError("nanoid size must be a finite number");
   }
-  if (!Number.isInteger(size)) {
+  if (!Number.isInteger(size) || Object.is(size, -0)) {
     throw new RangeError("nanoid size must be an integer");
   }
   if (size < 0) {
@@ -62,7 +62,7 @@ export function nanoid(size = 21): string {
   crypto.getRandomValues(bytes);
   let result = "";
   for (let i = 0; i < size; i++) {
-    result += URL_SAFE[bytes[i]! % URL_SAFE_LEN];
+    result += URL_SAFE[bytes[i] as number % URL_SAFE_LEN];
   }
   return result;
 }
@@ -72,7 +72,7 @@ export function shortid(): string {
   crypto.getRandomValues(bytes);
   let result = "";
   for (let i = 0; i < 4; i++) {
-    result += bytes[i]!.toString(16).padStart(2, "0");
+    result += (bytes[i] as number).toString(16).padStart(2, "0");
   }
   return result;
 }

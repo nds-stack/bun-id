@@ -1,1 +1,1 @@
-export { ulid, nanoid, shortid, uuid } from "./id.ts";
+export { ulid, nanoid, shortid, uuid } from "./id.js";

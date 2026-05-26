@@ -121,7 +121,7 @@ uuid()      | 3.9M ops/s
 
 - **Not sequential** — Only `ulid()` is sortable (by timestamp). `nanoid`, `shortid`, and `uuid` are random.
 - **No timestamp extraction** — bun-id doesn't expose ULID timestamp decoding. Use a dedicated ULID library if needed.
-- **No monotonicity** — ULID generation in the same millisecond may not be strictly monotonic (no counter).
+- **ULID monotonic** — IDs generated in the same millisecond are guaranteed to be strictly increasing via a counter.
 - **ShortID collisions** — 32 bits (4 billion values) means collisions are possible at scale. Use `nanoid()` or `ulid()` for primary keys.
 
 ---
@@ -158,13 +158,13 @@ uuid();      // always succeeds
 nanoid(0);   // → "" (empty string)
 ```
 
-All other edge cases (negative size, non-integer size) are handled by `crypto.getRandomValues()` — the Web API will throw its own `TypeError` for invalid arguments, which is the expected behavior.
+For negative size, non-integer size, NaN, or infinite values, `nanoid()` throws a `RangeError` with a descriptive message.
 
 ---
 
 ## Multi-Instance
 
-ID generation is **stateless** — no shared state, no counters, no timestamps stored between calls. This makes all functions safe for concurrent use in workers, clusters, or serverless runtimes:
+ID generation is **safe for concurrent use** — `nanoid()`, `shortid()`, and `uuid()` are stateless and have no shared mutation. `ulid()` maintains internal state for monotonicity (counter for same-millisecond calls) but is still safe across workers and serverless runtimes since each call is independent:
 
 ```typescript
 import { ulid } from "@nds-stack/bun-id";
